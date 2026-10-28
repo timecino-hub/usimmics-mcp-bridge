@@ -15,6 +15,8 @@ async def main():
     parser.add_argument('--arguments-file', type=Path)
     parser.add_argument('--config', type=Path)
     args=parser.parse_args()
+    if args.tool in {"start_job", "job_status", "cancel_job"}:
+        parser.error("Background jobs require a persistent MCP session; use run_schematic or parameter_sweep in this one-shot CLI")
     env=dict(os.environ)
     if args.config: env['USIMMICS_BRIDGE_CONFIG']=str(args.config.resolve())
     params=StdioServerParameters(command=sys.executable,

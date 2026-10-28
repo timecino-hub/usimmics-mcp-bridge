@@ -25,8 +25,15 @@ def test_compare_exact_and_dc():
 def test_isolated_sweep(tmp_path,monkeypatch):
     b=fixture(tmp_path);comps,routes=design();source=tmp_path/'mixer.sch'
     build_schematic(b,str(source),comps,routes);before=source.read_bytes()
-    monkeypatch.setattr(b,'run_schematic',lambda path,timeout:{'dataset':'fake'})
-    monkeypatch.setattr(b,'_read_results_data',lambda path,max_points,**kwargs:(b'',DatasetStub().read_results(path,max_points)))
+    from types import SimpleNamespace
+    from test_results_integrity import hb_binary
+    b.simulator.parent.mkdir(parents=True)
+    b.simulator.write_bytes(b'placeholder for the controlled solver hook')
+    def execute(netpath, dataset, log, timeout):
+        dataset.write_bytes(hb_binary())
+        log.write_text('Synthetic sweep fixture')
+        return SimpleNamespace(returncode=0, output_tail='')
+    monkeypatch.setattr(b, '_execute_solver', execute)
     out=parameter_sweep(b,str(source),'V1','frequency',['1 MHz','2 MHz'],variable='out.Vb')
     assert len(out['rows'])==2 and out['source_unchanged']
     assert source.read_bytes()==before and Path(out['csv_path']).exists()

@@ -1,10 +1,5 @@
 """Bounded independent parameter runs and exact frequency comparisons."""
-import csv
-import io
-import json
 import math
-from pathlib import Path
-from uuid import uuid4
 from .core import BridgeError
 from .numeric import voltage_power_dbm
 
@@ -60,27 +55,9 @@ def compare_results(workbench, dataset_paths, variable, frequency_hz, impedance=
             'warnings': warnings}
 
 
-def parameter_sweep(workbench,path,component,parameter,values,variable='IF_out.Vb',frequency_hz=1e6,timeout=30):
-    if not isinstance(values,list) or not 1<=len(values)<=20 or any(not isinstance(v,str) or not v for v in values):
-        raise BridgeError('Supply 1..20 nonempty parameter strings')
-    if type(timeout) is not int or not 1<=timeout<=30: raise BridgeError('Per-run timeout must be 1..30 seconds (maximum total solver time 600 seconds)')
-    original=workbench.read_schematic(path)
-    folder=workbench.target(str(Path(original['path']).parent/'.usimmics-sweeps'))
-    folder.mkdir(exist_ok=True)
-    folder=folder/uuid4().hex;folder.mkdir()
-    rows=[]
-    for index,value in enumerate(values):
-        variant=folder/f'point_{index:03d}.sch'
-        saved=workbench.save_schematic(str(variant),original['content'])
-        workbench.update_parameters(str(variant),[{'component':component,'parameter':parameter,'value':value}],saved['sha256'])
-        run=workbench.run_schematic(str(variant),timeout)
-        result=compare_results(workbench,[run['dataset']],variable,frequency_hz)
-        rows.append({'index':index,'value':value,**result['rows'][0],'source':str(variant)})
-    report={'source':original['path'],'source_sha256':original['sha256'],'component':component,'parameter':parameter,
-            'variable':variable,'rows':rows,'source_unchanged':workbench.read_schematic(path)['sha256']==original['sha256']}
-    if not report['source_unchanged']:raise BridgeError('Source was changed externally during sweep')
-    json_path=folder/'summary.json';csv_path=folder/'summary.csv'
-    workbench.atomic_write(json_path,(json.dumps(report,indent=2,allow_nan=False)+'\n').encode())
-    stream=io.StringIO(newline='');writer=csv.DictWriter(stream,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)
-    workbench.atomic_write(csv_path,stream.getvalue().encode('utf-8'))
-    return {**report,'json_path':str(json_path),'csv_path':str(csv_path)}
+def parameter_sweep(workbench, path, component, parameter, values, variable='IF_out.Vb',
+                    frequency_hz=1e6, timeout=30, *, fail_fast=True, resume_from=None, control=None):
+    """Run/checkpoint independent variants and return successful and failed points."""
+    from .sweeps import run_sweep
+    return run_sweep(workbench, path, component, parameter, values, variable, frequency_hz,
+                     timeout, fail_fast=fail_fast, resume_from=resume_from, control=control)
