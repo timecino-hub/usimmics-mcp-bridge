@@ -1,20 +1,16 @@
 """Structured, explicitly routed authoring for the supported 5.9 subset."""
 import re
 from .core import BridgeError, IDENT, NAMES, PROP
-
-DEFAULTS = {
-    'R':['50 Ohm','26.85','0','0','26.85','european'],
-    'C':['1 pF','0','0','0','26.85','european'],
-    'L':['1 nH','0','0','0','26.85','european'],
-    'Vac':['1 V','1 MHz','0','0','con_2'], 'Vdc':['1 V','battery','SIL-2'],
-    'Filter':['1 MHz','3','bandpass','butterworth','50 Ohm','1 MHz'],
-}
+from .component_specs import COMPONENT_SPECS, DEFAULTS
+from .schemas import normalize_build
 
 
 def build_schematic(workbench, path, components, connections, harmonics=None, expected_sha256=None):
     """Save a structured circuit. Explicit routes must not cross unrelated nets."""
-    if not 1 <= len(components) <= 100 or not 1 <= len(connections) <= 300:
-        raise BridgeError('Builder limits: 1..100 components and 1..300 connections')
+    try:
+        components, connections, harmonics = normalize_build(components, connections, harmonics)
+    except ValueError as exc:
+        raise BridgeError(f'Invalid circuit description: {exc}') from exc
     items={};records=[];pins={};freqs=[]
     for c in components:
         kind=c['type'];name=c['name'];pos=c['position'];rot=c.get('orientation',0)
@@ -38,13 +34,13 @@ def build_schematic(workbench, path, components, connections, harmonics=None, ex
             except ValueError as exc: raise BridgeError('Unknown parameter: '+key) from exc
             if idx>=len(props): raise BridgeError('Parameter exceeds property list')
             props[idx]=value
-        if any(not isinstance(v,str) or any(s in v for s in ['"','\n','\r','\x00']) for v in props):
-            raise BridgeError('Properties must be single-line strings without quotes')
+        try:
+            COMPONENT_SPECS[kind].validate_properties(kind, props)
+        except ValueError as exc:
+            raise BridgeError(str(exc)) from exc
         x,y=pos
-        offsets=[(0,0)] if kind=='GND' else ([(0,-30),(0,30)] if kind in ('Vac','Vdc') else [(-30,0),(30,0)])
-        for i,(dx,dy) in enumerate(offsets):
-            for _ in range(rot): dx,dy=dy,-dx
-            pins[(name,i)]=(x+dx,y+dy)
+        for i, pin in enumerate(COMPONENT_SPECS[kind].pins(x, y, rot)):
+            pins[(name,i)] = pin
         items[name]=c
         if kind=='Vac': freqs.append(props[1])
         visible={'Vac':{0,1},'Filter':{0,1,5},'Diode':set()}.get(kind,{0})
@@ -55,9 +51,7 @@ def build_schematic(workbench, path, components, connections, harmonics=None, ex
             raise BridgeError('Label offset must be an integer pair')
         tx,ty=label
         records.append(f'{kind} {"*" if kind=="GND" else name} 1 {x} {y} {tx} {ty} {rot}'+(' '+fields if fields else ''))
-    order=(harmonics or {}).get('order',3);count=(harmonics or {}).get('count',4)
-    if type(order) is not int or type(count) is not int or not 1<=order<=16 or not 1<=count<=32:
-        raise BridgeError('HB order must be 1..16 and count 1..32')
+    order=harmonics['order'];count=harmonics['count']
     if not freqs: raise BridgeError('Builder requires at least one Vac source for HB')
     spec=str(order)+'@;'+''.join(str(count)+'@'+f+';' for f in dict.fromkeys(freqs))
     hb_y=max(c['position'][1] for c in components)+100
