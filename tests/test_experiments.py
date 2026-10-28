@@ -26,7 +26,7 @@ def test_isolated_sweep(tmp_path,monkeypatch):
     b=fixture(tmp_path);comps,routes=design();source=tmp_path/'mixer.sch'
     build_schematic(b,str(source),comps,routes);before=source.read_bytes()
     monkeypatch.setattr(b,'run_schematic',lambda path,timeout:{'dataset':'fake'})
-    monkeypatch.setattr(b,'read_results',DatasetStub().read_results)
+    monkeypatch.setattr(b,'_read_results_data',lambda path,max_points,**kwargs:(b'',DatasetStub().read_results(path,max_points)))
     out=parameter_sweep(b,str(source),'V1','frequency',['1 MHz','2 MHz'],variable='out.Vb')
     assert len(out['rows'])==2 and out['source_unchanged']
     assert source.read_bytes()==before and Path(out['csv_path']).exists()

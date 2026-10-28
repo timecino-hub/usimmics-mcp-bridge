@@ -11,9 +11,10 @@ import math
 import os
 from pathlib import Path
 import re
-import struct
 import subprocess
 import tempfile
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 from .locking import locked_write
@@ -23,6 +24,12 @@ from .schemas import BridgeConfig, normalize_edits
 
 class BridgeError(ValueError):
     """A request cannot be performed within the supported interface."""
+
+
+@dataclass(frozen=True)
+class SolverOutcome:
+    returncode: int
+    output_tail: str
 
 
 PROP = re.compile(r'"([^"\r\n]*)"([01])')
@@ -292,6 +299,9 @@ class Bridge:
                                    timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 status["simulator_banner"] = (p.stdout + p.stderr).decode("utf-8", errors="replace").strip()
                 status["simulator_returncode"] = p.returncode
+                if p.returncode == 0:
+                    from .provenance import remember_simulator_banner
+                    remember_simulator_banner(self.simulator, status["simulator_banner"])
             except (OSError, subprocess.TimeoutExpired) as exc:
                 status["simulator_error"] = str(exc)
         return status
@@ -391,7 +401,23 @@ class Bridge:
         return dict(path=str(p), backup=str(backup), sha256=_sha(updated), changes=changes,
                     hb_frequency_keys_synchronized=bool(frequencies), gui_reload_required=True)
 
+    def _execute_solver(self, netpath: Path, dataset: Path, log: Path, timeout: int):
+        """Execution hook kept separate from result validation and provenance."""
+        try:
+            proc = subprocess.run([str(self.simulator), str(netpath), str(dataset)], cwd=netpath.parent,
+                                  capture_output=True, timeout=timeout,
+                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        except subprocess.TimeoutExpired as exc:
+            log.write_bytes((exc.stdout or b'') + (exc.stderr or b'') + b'\nTIMEOUT\n')
+            raise
+        output = proc.stdout + proc.stderr
+        log.write_bytes(output)
+        return SolverOutcome(proc.returncode, output.decode('utf-8', errors='replace')[-2000:])
+
     def run_schematic(self, path: str, timeout: int = 60) -> dict:
+        from . import __version__
+        from .provenance import SCHEMA_VERSION, dataset_sidecar, simulator_metadata, write_manifest
+
         p = self._path(path, ".sch")
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
             raise BridgeError("timeout must be an integer from 1 to 300 seconds")
@@ -406,85 +432,78 @@ class Bridge:
         run = runs / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid4().hex[:8])
         run.mkdir()
         netpath, dataset, log = run / 'circuit.net', run / 'result.dat', run / 'simulation.log'
+        snapshot = run / 'source.sch'
+        snapshot.write_bytes(source)
         netpath.write_bytes(net.encode('utf-8'))
+        manifest = run / 'manifest.json'
+        sidecar = dataset_sidecar(dataset)
+        started_clock = time.monotonic()
+        info = {'schema_version': SCHEMA_VERSION, 'kind': 'simulation', 'run_id': run.name,
+                'status': 'running', 'source': str(p), 'source_sha256': _sha(source),
+                'source_snapshot': str(snapshot), 'source_snapshot_sha256': _sha(source),
+                'dataset': str(dataset), 'dataset_sha256': None,
+                'netlist': str(netpath), 'netlist_sha256': _sha(netpath.read_bytes()),
+                'log': str(log), 'bridge_version': __version__,
+                'simulator': simulator_metadata(self.simulator),
+                'started_at': datetime.now(timezone.utc).isoformat(),
+                'completed_at': None, 'duration_seconds': None, 'exit_code': None,
+                'validation': None, 'error': None}
+        write_manifest(manifest, info)
+        write_manifest(sidecar, info)
+
+        def finish(status, *, error=None, exit_code=None, result=None):
+            info.update(status=status, completed_at=datetime.now(timezone.utc).isoformat(),
+                        duration_seconds=time.monotonic() - started_clock,
+                        exit_code=exit_code, error=error)
+            if result is not None:
+                info.update(dataset_sha256=result['dataset_sha256'], validation=result['validation'])
+            # Until the dataset-bound sidecar is replaced, readers still see
+            # running/failed rather than falling back to this run manifest.
+            write_manifest(manifest, info)
+            write_manifest(sidecar, info)
+
+        proc = None
         try:
-            proc = subprocess.run([str(self.simulator), str(netpath), str(dataset)], cwd=run,
-                                  capture_output=True, timeout=timeout,
-                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            proc = self._execute_solver(netpath, dataset, log, timeout)
+            if proc.returncode != 0 or not dataset.is_file() or dataset.stat().st_size == 0:
+                raise BridgeError(f"Simulation failed (exit {proc.returncode}); log: {log}: " + proc.output_tail)
+            # max_points bounds response size only: the reader validates every
+            # value, including invalid samples later in an otherwise valid file.
+            _, result = self._read_results_data(str(dataset), max_points=1, require_hb=True)
         except subprocess.TimeoutExpired as exc:
-            log.write_bytes((exc.stdout or b'') + (exc.stderr or b'') + b'\nTIMEOUT\n')
+            finish('timed_out', error={'code': 'timeout', 'message': str(exc)})
             raise BridgeError(f"Simulation timed out; log: {log}") from exc
         except OSError as exc:
-            raise BridgeError(f"Cannot launch simulator: {exc}") from exc
-        log.write_bytes(proc.stdout + proc.stderr)
-        if proc.returncode != 0 or not dataset.is_file() or dataset.stat().st_size == 0:
-            raise BridgeError(f"Simulation failed (exit {proc.returncode}); log: {log}: " +
-                              (proc.stdout + proc.stderr).decode('utf-8', errors='replace')[-2000:])
-        result = self.read_results(str(dataset), max_points=1)
-        (run / 'manifest.json').write_text(json.dumps({
-            'source': str(p), 'source_sha256': _sha(source),
-            'dataset_sha256': _sha(dataset.read_bytes()),
-            'netlist_sha256': _sha(netpath.read_bytes())}, indent=2), encoding='utf-8')
+            finish('failed', error={'code': 'io_error', 'message': str(exc)},
+                   exit_code=proc.returncode if proc is not None else None)
+            raise BridgeError(f"Simulation I/O failed; log: {log}: {exc}") from exc
+        except BridgeError as exc:
+            finish('failed', error={'code': 'invalid_results' if proc is not None and proc.returncode == 0
+                                   else 'solver_failed', 'message': str(exc)},
+                   exit_code=proc.returncode if proc is not None else None)
+            raise
+        finish('success', exit_code=proc.returncode, result=result)
         return dict(status='success', source=str(p), source_sha256=_sha(source),
                     netlist=str(netpath), dataset=str(dataset), log=str(log),
+                    dataset_sha256=result['dataset_sha256'], run_id=run.name,
+                    manifest=str(manifest), dataset_manifest=str(sidecar), source_snapshot=str(snapshot),
+                    duration_seconds=info['duration_seconds'], started_at=info['started_at'],
+                    completed_at=info['completed_at'], validation=result['validation'],
+                    simulator=info['simulator'],
                     exit_code=proc.returncode, variables=[v['name'] for v in result['variables']],
                     scope='uSimmics 5.9 supported schematic subset')
 
-    def read_results(self, path: str, max_points: int = 2000) -> dict:
+    def _read_results_data(self, path: str, max_points: int = 2000, *, require_hb: bool = False,
+                           selected_names: set[str] | None = None):
+        from .datasets import parse_dataset, read_dataset_bytes
+        from .provenance import inspect_provenance, provenance_summary
+
         p = self._path(path, '.dat')
-        if isinstance(max_points, bool) or not isinstance(max_points, int) or not 1 <= max_points <= 100000:
-            raise BridgeError('max_points must be from 1 to 100000')
-        if p.stat().st_size > 64 * 1024 * 1024:
-            raise BridgeError('Dataset exceeds the 64 MiB reader limit')
-        data = p.read_bytes()
-        if len(data) < 16 or data[:12] != b'QucsData\x00\x00\x02\x03':
-            raise BridgeError('Only the verified uSimmics binary QucsData v2 format is supported')
-        end = 16 + struct.unpack_from('<I', data, 12)[0]
-        if end > len(data):
-            raise BridgeError('Dataset header is truncated')
-        cursor, records = 16, []
-        def cstring():
-            nonlocal cursor
-            zero = data.find(b'\0', cursor, end)
-            if zero < 0:
-                raise BridgeError('Dataset header string is not terminated')
-            try:
-                value = data[cursor:zero].decode('utf-8')
-            except UnicodeError as exc:
-                raise BridgeError('Dataset header has invalid text') from exc
-            cursor = zero + 1
-            return value
-        while cursor < end:
-            if cursor + 8 > end:
-                raise BridgeError('Dataset variable header is truncated')
-            kind = data[cursor]
-            if kind not in (3, 5):
-                raise BridgeError(f'Unsupported dataset variable type {kind}')
-            unit = data[cursor + 1:cursor + 4].rstrip(b'\0').decode('ascii', errors='replace')
-            count = struct.unpack_from('<I', data, cursor + 4)[0]
-            cursor += 8
-            name = cstring()
-            deps = [cstring()] if kind == 3 else []
-            records.append(dict(name=name, unit=unit, dependencies=deps,
-                                type='complex' if kind == 3 else 'real', total_points=count))
-        cursor = end
-        for record in records:
-            complex_ = record['type'] == 'complex'
-            size = 16 if complex_ else 8
-            count = record['total_points']
-            if cursor + size * count > len(data):
-                raise BridgeError('Dataset sample payload is truncated')
-            values = []
-            for i in range(min(count, max_points)):
-                offset = cursor + size * i
-                if complex_:
-                    real, imag = struct.unpack_from('<dd', data, offset)
-                    values.append(dict(real=real, imag=imag, magnitude=math.hypot(real, imag)))
-                else:
-                    values.append(struct.unpack_from('<d', data, offset)[0])
-            cursor += size * count
-            record.update(truncated=count > max_points, data=values)
-        if cursor != len(data):
-            raise BridgeError('Unsupported trailing dataset payload')
-        return _safe(dict(path=str(p), format='QucsData-v2', variables=records,
-                          truncated=any(v['truncated'] for v in records)))
+        data = read_dataset_bytes(p)
+        result = parse_dataset(data, max_points, require_hb=require_hb, selected_names=selected_names)
+        provenance = inspect_provenance(self, p, result['dataset_sha256'])
+        return data, {'path': str(p), **result, 'provenance': provenance_summary(provenance),
+                      'warnings': [] if provenance['verified'] else [provenance['reason']]}
+
+    def read_results(self, path: str, max_points: int = 2000) -> dict:
+        return self._read_results_data(path, max_points)[1]
