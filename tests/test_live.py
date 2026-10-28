@@ -7,6 +7,7 @@ from usimmics_bridge.config import discover_installation
 from usimmics_bridge.workspace import Workbench
 from usimmics_bridge.builder import build_schematic
 from usimmics_bridge.experiments import compare_results, parameter_sweep
+from usimmics_bridge.templates import get_schematic_template
 from test_builder import design
 
 pytestmark=pytest.mark.integration
@@ -61,8 +62,7 @@ def test_native_vdc_default(live,tmp_path):
 
 
 def test_native_bat54_mixer(live,tmp_path):
-    example=Path(__file__).parents[1]/'examples/mixer.json'
-    spec=json.loads(example.read_text())
+    spec=get_schematic_template('mixer')['specification']
     dataset=solve(live,tmp_path/'mixer.sch',spec['components'],spec['connections'])
     voltage=compare_results(live,[dataset],'IF_out.Vb',1e6)['rows'][0]['magnitude_v']
     assert voltage==pytest.approx(0.06129164,rel=1e-4)

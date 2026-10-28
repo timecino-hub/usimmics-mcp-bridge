@@ -8,12 +8,13 @@ import sys
 from PIL import Image
 from mcp import ClientSession,StdioServerParameters
 from mcp.client.stdio import stdio_client
+from usimmics_bridge.templates import get_schematic_template
 
 
 def test_real_stdio_workspace_roundtrip(tmp_path):
     cfg=tmp_path/'config.json'
     cfg.write_text(json.dumps({'installation_root':str(tmp_path/'no-simulator'),'project_roots':[str(tmp_path)]}),encoding='utf-8')
-    spec=json.loads((Path(__file__).parents[1]/'examples/voltage_divider.json').read_text(encoding='utf-8'))
+    spec=get_schematic_template('voltage_divider')['specification']
     async def exercise():
         params=StdioServerParameters(command=sys.executable,args=['-m','usimmics_bridge.server'],
                                     env={**os.environ,'USIMMICS_BRIDGE_CONFIG':str(cfg)})

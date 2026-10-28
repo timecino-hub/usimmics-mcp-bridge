@@ -12,6 +12,7 @@ from usimmics_bridge.workspace import Workbench as Bridge
 from .config import config_path, doctor
 from .execution import run_async
 from .runtime_tools import register_runtime_tools, server_lifespan
+from .templates import register_template_tools
 from pydantic import StrictBool
 from .builder import build_schematic as _build
 from .experiments import parameter_sweep as _sweep, compare_results as _compare
@@ -147,7 +148,7 @@ async def preview_schematic(path: str, dataset_path: str | None = None) -> list:
     screenshot of the native GUI and omits Paintings annotations with a warning. Colliding labels
     are nudged clear and named in adjusted_labels. The optional spectrum draws one panel per node
     voltage (peak-voltage dBm/50 Ohm, labelled display floor) and labels the strongest lines with
-    mixing product, frequency and level; spectrum_markers returns those exact values. Data whose
+    mixing product, frequency and level; spectrum_markers returns dBm rounded to two decimals. Data whose
     provenance does not match the schematic is flagged in the image.
     """
     result = await asyncio.to_thread(lambda: Bridge(CONFIG).preview_schematic(path, dataset_path))
@@ -195,6 +196,7 @@ async def compare_results(dataset_paths: DatasetPaths, variable: str, frequency_
 
 
 register_runtime_tools(mcp, CONFIG)
+register_template_tools(mcp)
 
 def main():
     mcp.run(transport="stdio")

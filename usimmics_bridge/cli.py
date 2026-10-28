@@ -12,6 +12,7 @@ from usimmics_bridge.core import BridgeError
 from .config import config_path, configure, doctor
 from .builder import build_schematic
 from .experiments import parameter_sweep, compare_results
+from .templates import list_schematic_templates, get_schematic_template, export_schematic_template
 
 
 def main() -> int:
@@ -24,6 +25,15 @@ def main() -> int:
     setup.add_argument('--installation-root')
     setup.add_argument('--project-root', action='append')
     setup.add_argument('--force', action='store_true')
+    examples = sub.add_parser('examples', help='List, show, or export installed circuit templates')
+    example_sub = examples.add_subparsers(dest='example_command', required=True)
+    example_sub.add_parser('list')
+    show = example_sub.add_parser('show')
+    show.add_argument('name', choices=['voltage_divider', 'mixer'])
+    export = example_sub.add_parser('export')
+    export.add_argument('name', choices=['voltage_divider', 'mixer'])
+    export.add_argument('--output', type=Path, required=True)
+    export.add_argument('--schematic-path', help='Add an absolute .sch destination to the build arguments')
     sub.add_parser("projects")
     call = sub.add_parser('call', help='Invoke a named workspace operation with a JSON arguments file')
     call.add_argument('operation', choices=['create_project','read_schematic','save_schematic',
@@ -44,6 +54,15 @@ def main() -> int:
     results.add_argument("--max-points", type=int, default=2000)
     args = parser.parse_args()
     try:
+        if args.command == 'examples':
+            if args.example_command == 'list':
+                result = list_schematic_templates()
+            elif args.example_command == 'show':
+                result = get_schematic_template(args.name)
+            else:
+                result = export_schematic_template(args.name, args.output, args.schematic_path)
+            print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+            return 0
         if args.command=='configure':
             result=configure(args.installation_root,args.project_root,args.config,args.force)
             print(json.dumps(result,ensure_ascii=False));return 0
