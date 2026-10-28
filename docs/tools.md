@@ -7,7 +7,7 @@ Paths passed to MCP tools must be absolute and within a configured project root.
 1. Call `create_project` with `{"name":"demo"}`.
 2. Read `examples/voltage_divider.json`, add a `path` field pointing to `<returned project_path>/divider.sch`, and call `build_schematic` with that object.
 3. Call `run_schematic` with that path. A 1 V peak, 1 MHz source and equal resistors produce 0.5 V peak at `out.Vb`.
-4. Call `preview_schematic` with the path and returned `dataset` as `dataset_path`. It returns a PNG and metadata.
+4. Call `preview_schematic` with the path and returned `dataset` as `dataset_path`. It returns a PNG and metadata; `spectrum_markers` lists the labelled spectral lines with exact dBm and mixing product, and `adjusted_labels` names any label the preview moved off a collision.
 5. Optionally call `publish_results` with the path, dataset path and returned `source_sha256` to update the normal GUI `.dat` file.
 
 For CLI transport, put the object in a JSON file and run `usimmics-mcp-call build_schematic --arguments-file build.json`. Use the same pattern for every tool.

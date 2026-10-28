@@ -130,8 +130,11 @@ def preview_schematic(path: str, dataset_path: str | None = None) -> list:
 
     Renders original component positions, labels, wires and supported symbols using the bridge
     renderer. The PNG is returned as native MCP image content and saved locally. It is NOT a
-    screenshot of the native GUI and omits Paintings annotations with a warning. Optional
-    spectrum uses peak-voltage dBm/50 Ohm, a labelled display floor, and dataset provenance.
+    screenshot of the native GUI and omits Paintings annotations with a warning. Colliding labels
+    are nudged clear and named in adjusted_labels. The optional spectrum draws one panel per node
+    voltage (peak-voltage dBm/50 Ohm, labelled display floor) and labels the strongest lines with
+    mixing product, frequency and level; spectrum_markers returns those exact values. Data whose
+    provenance does not match the schematic is flagged in the image.
     """
     result = Bridge(CONFIG).preview_schematic(path, dataset_path)
     return [json.dumps(result, ensure_ascii=False), Image(path=result['image_path'])]
