@@ -30,7 +30,7 @@ Issues = "https://github.com/timecino-hub/usimmics-mcp-bridge/issues"
 packages = ["usimmics_bridge"]
 
 [tool.hatch.build.targets.sdist]
-include = ["usimmics_bridge", "tests", "examples", "skill", "docs", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "config.example.json", "uv.lock", ".github", ".gitignore"]
+include = ["usimmics_bridge", "tests", "examples", "scripts", "skill", "docs", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "config.example.json", "uv.lock", ".github", ".gitignore"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

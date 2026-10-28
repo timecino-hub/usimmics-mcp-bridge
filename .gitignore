@@ -20,3 +20,4 @@ release-artifacts/
 local-requests/
 .testtmp*/
 .usimmics-sweeps/
+.ci-runtime-requirements.txt

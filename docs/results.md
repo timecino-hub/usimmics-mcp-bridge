@@ -24,7 +24,7 @@ Each isolated run stores the exact input bytes as `source.sch`, the compiled
 `circuit.net`, `result.dat`, `simulation.log`, and `manifest.json`. The dataset
 also has a dedicated `result.dat.manifest.json`. Schema version 1 records:
 
-- `status`: running, success, failed or timed_out;
+- `status`: running, success, failed, timed_out or cancelled;
 - source, dataset and netlist paths and SHA256 digests;
 - the source snapshot path and hash;
 - run ID, start/end timestamps and elapsed seconds;
@@ -35,7 +35,7 @@ The simulator version reuses a successful `environment_status`/doctor query in
 the same process. If it has not been queried, `simulator.version` is null and
 `version_source` is `not_queried`; starting a run never adds a version subprocess.
 Invalid solver output is a failed run even when the process exited with code 0.
-Failed and timed-out runs retain their input snapshot and failure manifest.
+Failed, timed-out and cancelled runs retain their input snapshot and failure manifest.
 
 ## Publication
 
