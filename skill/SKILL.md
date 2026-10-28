@@ -16,7 +16,7 @@ Use `usimmics-mcp-call list` or `usimmics-mcp-call <tool> --arguments-file <json
 - For new circuits, use `create_project` and `build_schematic`. Components have type/name/position/orientation/params; connections reference component pin indices and explicit orthogonal waypoints. Read the tool schema and examples before introducing an unfamiliar component. BAT54 is loaded from the user's installation.
 - For complete-file edits, call `read_schematic`, modify the returned source, then `save_schematic` with the inspected SHA256. New targets omit the hash. Existing targets are backed up. Use `clone_schematic` for independent experiments.
 - For parameter edits, use semantic names or zero-based indices from `inspect_schematic`. `update_parameters` synchronizes HB source-frequency keys, including splits/merges.
-- Call `validate_schematic`, then `run_schematic`, then `read_results` or `preview_schematic` using the returned dataset. Inspect PNGs for layout defects and note freshness/warnings.
+- Call `validate_schematic`, then `run_schematic`, then `read_results` or `preview_schematic` using the returned dataset. Inspect PNGs for layout defects and note freshness/warnings. Quote spectral levels from `spectrum_markers` rather than estimating them from the plot.
 - `publish_results` saves a verified dataset to the normal `.dat` location for native plotting. Requires matching source/result provenance and `DataSet=*.dat`. Native windows need reloading before their next save.
 - `parameter_sweep` creates isolated variants (maximum 20 points, 30 seconds per solver call) and JSON/CSV comparisons without modifying the source. Select a frequency actually present in every compared dataset. `compare_results` never interpolates.
 

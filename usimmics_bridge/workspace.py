@@ -194,7 +194,9 @@ class Workbench(Bridge):
         folder = self.target(str(p.parent/'.usimmics-previews'))
         folder.mkdir(exist_ok=True)
         output = folder/(p.stem+'-'+uuid4().hex[:10]+'.png')
-        rendered = render(source['content'], output, p.name, result)
+        notes = {'unverified': 'dataset provenance is not recorded; it may not belong to this schematic',
+                 'stale_or_modified': 'dataset does not match the saved schematic; rerun before trusting it'}
+        rendered = render(source['content'], output, p.name, result, notes.get(freshness))
         return {'path': str(p), 'source_sha256': source['sha256'], 'image_path': str(output),
                 'renderer': 'bridge schematic renderer, not a native GUI screenshot',
                 'state': 'saved_on_disk', 'dataset_freshness': freshness,
