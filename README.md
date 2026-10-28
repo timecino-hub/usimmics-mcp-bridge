@@ -6,7 +6,7 @@
 
 Let an AI assistant build, simulate and inspect **uSimmics 5.9** circuits for you. The bridge is a local [MCP](https://modelcontextprotocol.io) server: your assistant edits saved `.sch` files, runs the native harmonic-balance solver in the background and gets back a picture of the circuit and its spectrum, without clicking through the desktop UI.
 
-> **Alpha 0.3.0a1.** Native simulation targets Windows with separately installed uSimmics 5.9. Portable CI checks package installation, files, previews and MCP; it does not establish that the native solver passes. This is an independent project, not an official uSimmics/QucsStudio product. Original Qucs and Qucs-S use different file formats.
+> **Alpha 0.3.0a2.** Native simulation targets Windows with separately installed uSimmics 5.9. Portable CI checks package installation, files, previews and MCP; it does not establish that the native solver passes. This is an independent project, not an official uSimmics/QucsStudio product. Original Qucs and Qucs-S use different file formats.
 
 [中文说明](docs/README.zh-CN.md) · [Tools and examples](docs/tools.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

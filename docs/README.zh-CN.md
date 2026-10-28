@@ -2,7 +2,7 @@
 
 让 AI 助手替你搭建、仿真和检查 **uSimmics 5.9** 电路。它是一个本地 [MCP](https://modelcontextprotocol.io) 服务器：助手直接编辑磁盘上的 `.sch` 文件，在后台调用 uSimmics 自带的谐波平衡求解器，再把电路图和频谱图返回给你，全程不需要操作桌面界面。
 
-> **Alpha 版 0.3.0a1。** 原生仿真面向 Windows + 单独安装的 uSimmics 5.9。跨平台 CI 检查安装、文件、预览与 MCP 接口，并不代表原生求解器已通过验证。本项目是独立实现，不是 uSimmics/QucsStudio 官方产品；原版 Qucs 和 Qucs-S 的文件格式不同。
+> **Alpha 版 0.3.0a2。** 原生仿真面向 Windows + 单独安装的 uSimmics 5.9。跨平台 CI 检查安装、文件、预览与 MCP 接口，并不代表原生求解器已通过验证。本项目是独立实现，不是 uSimmics/QucsStudio 官方产品；原版 Qucs 和 Qucs-S 的文件格式不同。
 
 [English](../README.md) · [工具说明（英文）](tools.md) · [参与贡献（英文）](../CONTRIBUTING.md)
 
