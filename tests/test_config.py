@@ -109,6 +109,10 @@ def test_doctor_missing_or_unwritable_project_root_is_not_ready(tmp_path, monkey
     ('uSimmics simulator 5.90', 0, '5.90', False),
     ('uSimmics simulator 5.9oops', 0, None, False),
     ('uSimmics simulator 5.9', 2, '5.9', False),
+    ('uSimmics Circuit Simulator 5.9\nCopyright (C) 2003-2026', -1, '5.9', True),
+    ('uSimmics Circuit Simulator 5.9\nCopyright (C) 2003-2026', 4294967295, '5.9', True),
+    ('uSimmics simulator 5.9', -1, '5.9', False),
+    ('uSimmics Circuit Simulator 5.90', -1, '5.90', False),
     ('unknown', 0, None, False),
     ('versions 5.9 and 6.0', 0, None, False),
 ])
@@ -129,3 +133,18 @@ def test_environment_status_preserves_version_exit_code(tmp_path, monkeypatch):
     result = Bridge(cfg).environment_status()
     assert result['simulator_returncode'] == 7
     assert result['simulator_banner'] == 'simulator 5.9'
+
+
+@pytest.mark.integration
+def test_doctor_accepts_native_windows_version_probe(tmp_path):
+    from usimmics_bridge.config import discover_installation
+    if os.name != 'nt':
+        pytest.skip('Native uSimmics is Windows-only')
+    install = discover_installation()
+    if install is None:
+        pytest.skip('Native uSimmics installation is unavailable')
+    cfg = tmp_path/'config.json'
+    cfg.write_text(json.dumps({'installation_root':str(install),'project_roots':[str(tmp_path)]}),encoding='utf-8')
+    report = doctor(cfg)
+    assert report['solver_ready'], report
+    assert report['ready'], report

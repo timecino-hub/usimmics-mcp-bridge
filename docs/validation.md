@@ -12,8 +12,11 @@ absolute paths before writing this format.
 - `workspace_ready`: every project root exists, is a directory, and passes the
   operating system's write/search permission check. This check does not create
   probe files; permissions or disk space can still change before a later write.
-- `solver_ready`: Windows, an existing simulator, a successful `--version`
-  invocation, and a parsed 5.9 version. Text such as `15.9` or `5.90` is not 5.9.
+- `solver_ready`: Windows, an existing simulator, a recognized `--version`
+  response, and a parsed 5.9 version. Exit 0 is accepted; the measured official
+  `uSimmics Circuit Simulator 5.9` banner also permits Windows DWORD(-1), exposed
+  as -1 or 4294967295. Other nonzero exits remain errors. Text such as `15.9` or
+  `5.90` is not 5.9.
 - `bat54_ready`: the installed library contains the BAT54 component. This is
   optional for RLC/source circuits and required when requesting that model.
 

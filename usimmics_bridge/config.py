@@ -107,14 +107,20 @@ def doctor(path=None):
                       next_step='Run usimmics-bridge configure --installation-root <uSimmics root> --project-root <project root>')
     version = parse_simulator_version(report.get('simulator_banner', ''))
     version_ok = version is not None and version.split('.')[:2] == ['5', '9']
+    # Official Windows 5.9 prints this banner and exits with DWORD(-1) for
+    # --version. Keep the exception narrow; other nonzero exits remain errors.
+    native_version_exit = (report.get('simulator_returncode') in (-1, 4294967295) and
+                           re.search(r'^\s*uSimmics Circuit Simulator 5\.9(?:\.\d+)?(?=\s|$)',
+                                     report.get('simulator_banner', ''), re.I | re.M) is not None)
+    version_exit_ok = report.get('simulator_returncode') == 0 or native_version_exit
     solver = {'ready': bool(report.get('simulator_exists') and
-                           report.get('simulator_returncode') == 0 and version_ok and os.name == 'nt'),
+                           version_exit_ok and version_ok and os.name == 'nt'),
               'exists': bool(report.get('simulator_exists')), 'version': version,
               'supported_version': '5.9', 'version_supported': version_ok,
               'version_exit_code': report.get('simulator_returncode'),
               'platform_supported': os.name == 'nt'}
     if not solver['ready']:
-        solver['next_step'] = 'Use Windows and configure a working uSimmics 5.9 installation; --version must exit successfully'
+        solver['next_step'] = 'Use Windows and configure a working uSimmics 5.9 installation with a recognized version response'
     bat54 = {'ready': bool(report.get('bat54_available')), 'required_for_base_workflow': False}
     if not bat54['ready']:
         bat54['next_step'] = 'For BAT54 circuits, restore library/B_Schottky.lib from your own uSimmics installation'
