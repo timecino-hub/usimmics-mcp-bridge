@@ -1,0 +1,16 @@
+{
+  "components": [
+    {"type": "Vac", "name": "V1", "position": [100, 130], "params": {"amplitude": "1 V", "frequency": "1 MHz"}},
+    {"type": "R", "name": "R1", "position": [250, 100], "params": {"resistance": "1 kOhm"}},
+    {"type": "R", "name": "R2", "position": [400, 130], "orientation": 3, "params": {"resistance": "1 kOhm"}},
+    {"type": "GND", "name": "G1", "position": [100, 250]},
+    {"type": "GND", "name": "G2", "position": [400, 250]}
+  ],
+  "connections": [
+    {"from": {"component": "V1", "pin": 0}, "to": {"component": "R1", "pin": 0}},
+    {"from": {"component": "R1", "pin": 1}, "to": {"component": "R2", "pin": 0}, "label": "out"},
+    {"from": {"component": "V1", "pin": 1}, "to": {"component": "G1", "pin": 0}},
+    {"from": {"component": "R2", "pin": 1}, "to": {"component": "G2", "pin": 0}}
+  ],
+  "harmonics": {"order": 3, "count": 4}
+}

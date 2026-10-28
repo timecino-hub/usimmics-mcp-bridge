@@ -1,0 +1,22 @@
+{
+  "components": [
+    {"type":"Vac","name":"RF","position":[160,230],"params":{"frequency":"11 MHz"}},
+    {"type":"Vac","name":"LO","position":[720,230],"params":{"frequency":"10 MHz"}},
+    {"type":"R","name":"R1","position":[270,200]},
+    {"type":"R","name":"R2","position":[590,200]},
+    {"type":"Diode","name":"D1","position":[400,230],"orientation":3,"model":"BAT54"},
+    {"type":"GND","name":"G1","position":[160,290]},
+    {"type":"GND","name":"G2","position":[720,290]},
+    {"type":"GND","name":"G3","position":[400,290]}
+  ],
+  "connections": [
+    {"from":{"component":"RF","pin":0},"to":{"component":"R1","pin":0}},
+    {"from":{"component":"R1","pin":1},"to":{"component":"D1","pin":0},"label":"IF_out"},
+    {"from":{"component":"D1","pin":0},"to":{"component":"R2","pin":0}},
+    {"from":{"component":"R2","pin":1},"to":{"component":"LO","pin":0}},
+    {"from":{"component":"RF","pin":1},"to":{"component":"G1","pin":0}},
+    {"from":{"component":"LO","pin":1},"to":{"component":"G2","pin":0}},
+    {"from":{"component":"D1","pin":1},"to":{"component":"G3","pin":0}}
+  ],
+  "harmonics":{"order":3,"count":4}
+}

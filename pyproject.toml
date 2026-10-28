@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "usimmics-mcp-bridge"
+version = "0.3.0a1"
+description = "Local MCP tools for a validated subset of uSimmics 5.9 circuit simulation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "uSimmics MCP Bridge contributors"}]
+dependencies = ["mcp>=1.26,<2", "Pillow>=12,<14", "filelock>=3.16,<5"]
+classifiers = ["Development Status :: 3 - Alpha", "Programming Language :: Python :: 3", "Operating System :: Microsoft :: Windows", "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)"]
+
+[project.scripts]
+usimmics-mcp = "usimmics_bridge.server:main"
+usimmics-bridge = "usimmics_bridge.cli:main"
+usimmics-mcp-call = "usimmics_bridge.client:entrypoint"
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1"]
+
+[project.urls]
+Repository = "https://github.com/timecino-hub/usimmics-mcp-bridge"
+Issues = "https://github.com/timecino-hub/usimmics-mcp-bridge/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["usimmics_bridge"]
+
+[tool.hatch.build.targets.sdist]
+include = ["usimmics_bridge", "tests", "examples", "skill", "docs", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "config.example.json", "uv.lock", ".github", ".gitignore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires a local licensed uSimmics 5.9 installation"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
