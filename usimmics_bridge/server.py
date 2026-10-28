@@ -1,15 +1,18 @@
 """Local stdio MCP entry point for the uSimmics 5.9 bridge."""
 from __future__ import annotations
 
-import os
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import FastMCP, Image, Context
 from mcp.types import ToolAnnotations
 from usimmics_bridge.workspace import Workbench as Bridge
 from .config import config_path, doctor
+from .execution import run_async
+from .runtime_tools import register_runtime_tools, server_lifespan
+from pydantic import StrictBool
 from .builder import build_schematic as _build
 from .experiments import parameter_sweep as _sweep, compare_results as _compare
 from .schemas import (
@@ -24,6 +27,7 @@ CREATE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHi
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 mcp = FastMCP(
     "usimmics",
+    lifespan=server_lifespan,
     instructions=(
         "Control local uSimmics 5.9 projects without GUI automation. Inspect the environment "
         "and schematic before editing. Pass the inspected SHA256 to update_parameters. "
@@ -39,25 +43,25 @@ mcp = FastMCP(
 
 
 @mcp.tool(annotations=READ)
-def environment_status() -> dict[str, Any]:
+async def environment_status() -> dict[str, Any]:
     """Check local installation, simulator, BAT54 library, configured project roots and capabilities."""
-    return doctor(CONFIG)
+    return await asyncio.to_thread(doctor, CONFIG)
 
 
 @mcp.tool(annotations=READ)
-def list_projects() -> dict[str, Any]:
+async def list_projects() -> dict[str, Any]:
     """List existing uSimmics projects in the configured local roots, without creating projects."""
-    return Bridge(CONFIG).list_projects()
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).list_projects())
 
 
 @mcp.tool(annotations=READ)
-def inspect_schematic(path: str) -> dict[str, Any]:
+async def inspect_schematic(path: str) -> dict[str, Any]:
     """Inspect a .sch file, component parameters and SHA256 before a background edit or run."""
-    return Bridge(CONFIG).inspect_schematic(path)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).inspect_schematic(path))
 
 
 @mcp.tool(annotations=WRITE)
-def update_parameters(path: str, edits: EditList, expected_sha256: str) -> dict[str, Any]:
+async def update_parameters(path: str, edits: EditList, expected_sha256: str) -> dict[str, Any]:
     """Atomically edit component parameters with backup and conflict detection.
 
     Each edit: {"component": "V1RF", "parameter": "frequency", "value": "12 MHz"}.
@@ -65,77 +69,77 @@ def update_parameters(path: str, edits: EditList, expected_sha256: str) -> dict[
     update matching harmonic-balance frequency keys. All edits validate before writing.
     Reload the file in uSimmics to see these disk changes.
     """
-    return Bridge(CONFIG).update_parameters(path, edits, expected_sha256)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).update_parameters(path, edits, expected_sha256))
 
 
 @mcp.tool(annotations=CREATE)
-def run_schematic(path: str, timeout: RunTimeout = 60) -> dict[str, Any]:
+async def run_schematic(path: str, ctx: Context, timeout: RunTimeout = 60) -> dict[str, Any]:
     """Compile a supported 5.9 schematic and run simulator.exe headlessly in an isolated run folder.
 
     Supports the documented R/C/L, Vac/Vdc, BAT54/Diode, Filter, GND and HB subset.
     Unknown components or ambiguous wiring fail explicitly. Returns unique output paths
     and solver status; does not overwrite the GUI's datasets or open a window.
     """
-    return Bridge(CONFIG).run_schematic(path, timeout)
+    return await run_async(lambda control: Bridge(CONFIG).run_schematic(path, timeout), context=ctx)
 
 
 @mcp.tool(annotations=READ)
-def read_results(path: str, max_points: ResultPointLimit = 2000) -> dict[str, Any]:
+async def read_results(path: str, max_points: ResultPointLimit = 2000) -> dict[str, Any]:
     """Read verified QucsData v2 real/complex simulation results, with a bounded number of points."""
-    return Bridge(CONFIG).read_results(path, max_points)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).read_results(path, max_points))
 
 
 @mcp.tool(annotations=CREATE)
-def create_project(name: str, root: str | None = None) -> ProjectResult:
+async def create_project(name: str, root: str | None = None) -> ProjectResult:
     """Create a new _prj directory in a configured project root. Fails if it already exists."""
-    return Bridge(CONFIG).create_project(name, root)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).create_project(name, root))
 
 
 @mcp.tool(annotations=READ)
-def read_schematic(path: str) -> ReadSchematicResult:
+async def read_schematic(path: str) -> ReadSchematicResult:
     """Read complete saved .sch source plus SHA256, including malformed files for diagnosis."""
-    return Bridge(CONFIG).read_schematic(path)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).read_schematic(path))
 
 
 @mcp.tool(annotations=WRITE)
-def save_schematic(path: str, content: str, expected_sha256: str | None = None) -> SaveResult:
+async def save_schematic(path: str, content: str, expected_sha256: str | None = None) -> SaveResult:
     """Save a complete supported 5.9 schematic atomically, including components, wires and plots.
 
     Supply full source from read_schematic with requested edits. Existing files require their
     current SHA256 and are backed up; omit the hash for new files. Syntax and connectivity
     validate before any write. Saves UTF-8/LF, never an unsaved GUI buffer.
     """
-    return Bridge(CONFIG).save_schematic(path, content, expected_sha256)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).save_schematic(path, content, expected_sha256))
 
 
 @mcp.tool(annotations=WRITE)
-def clone_schematic(source: str, destination: str, expected_sha256: str | None = None) -> SaveResult:
+async def clone_schematic(source: str, destination: str, expected_sha256: str | None = None) -> SaveResult:
     """Save a copy of a schematic as an independent variant. Existing destination needs its hash."""
-    return Bridge(CONFIG).clone_schematic(source, destination, expected_sha256)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).clone_schematic(source, destination, expected_sha256))
 
 
 @mcp.tool(annotations=READ)
-def validate_schematic(path: str) -> dict[str, Any]:
+async def validate_schematic(path: str) -> dict[str, Any]:
     """Check saved-file sections, plot closure, supported component connections and HB settings.
 
     Returns valid/errors/warnings and a compiled netlist. This is supported-format validation,
     not a claim that every native GUI feature can be rendered or checked.
     """
-    return Bridge(CONFIG).validate_schematic(path)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).validate_schematic(path))
 
 
 @mcp.tool(annotations=WRITE)
-def publish_results(path: str, dataset_path: str, expected_sha256: str) -> dict[str, Any]:
+async def publish_results(path: str, dataset_path: str, expected_sha256: str) -> dict[str, Any]:
     """Save this bridge's verified run dataset to the schematic's normal .dat path for GUI plots.
 
     Requires matching run provenance and current schematic hash. Backs up existing .dat.
     Refuses stale results and custom DataSet paths. Reload in the GUI to view changes there.
     """
-    return Bridge(CONFIG).publish_results(path, dataset_path, expected_sha256)
+    return await asyncio.to_thread(lambda: Bridge(CONFIG).publish_results(path, dataset_path, expected_sha256))
 
 
 @mcp.tool(annotations=CREATE)
-def preview_schematic(path: str, dataset_path: str | None = None) -> list:
+async def preview_schematic(path: str, dataset_path: str | None = None) -> list:
     """Return a PNG image of the saved circuit layout and optionally its discrete HB spectrum.
 
     Renders original component positions, labels, wires and supported symbols using the bridge
@@ -146,12 +150,12 @@ def preview_schematic(path: str, dataset_path: str | None = None) -> list:
     mixing product, frequency and level; spectrum_markers returns those exact values. Data whose
     provenance does not match the schematic is flagged in the image.
     """
-    result = Bridge(CONFIG).preview_schematic(path, dataset_path)
+    result = await asyncio.to_thread(lambda: Bridge(CONFIG).preview_schematic(path, dataset_path))
     return [json.dumps(result, ensure_ascii=False), Image(path=result['image_path'])]
 
 
 @mcp.tool(annotations=WRITE)
-def build_schematic(path: str, components: ComponentList, connections: ConnectionList,
+async def build_schematic(path: str, components: ComponentList, connections: ConnectionList,
                     harmonics: HarmonicSettings | None = None, expected_sha256: str | None = None) -> SaveResult:
     """Build and save a circuit from component/pin descriptions without writing .sch syntax.
 
@@ -162,29 +166,35 @@ def build_schematic(path: str, components: ComponentList, connections: Connectio
     All routes must be orthogonal. Different-net crossings/touches are rejected.
     Harmonics: {order:3,count:4}. Source frequencies are inserted automatically.
     """
-    return _build(Bridge(CONFIG),path,components,connections,harmonics,expected_sha256)
+    return await asyncio.to_thread(lambda: _build(Bridge(CONFIG),path,components,connections,harmonics,expected_sha256))
 
 
 @mcp.tool(annotations=CREATE)
-def parameter_sweep(path: str, component: str, parameter: str, values: SweepValues,
-                    variable: str = 'IF_out.Vb', frequency_hz: Frequency = 1e6, timeout: SweepTimeout = 30) -> dict[str, Any]:
+async def parameter_sweep(path: str, component: str, parameter: str, values: SweepValues, ctx: Context,
+                    variable: str = 'IF_out.Vb', frequency_hz: Frequency = 1e6, timeout: SweepTimeout = 30,
+                    fail_fast: StrictBool = True, resume_from: str | None = None) -> dict[str, Any]:
     """Simulate 1..20 independent parameter variants, preserve source, return JSON/CSV comparison.
 
     Each run is limited to 1..30 seconds. Comparison frequency must exist as an actual sample.
-    Results record the source hash and variant paths; no GUI data is overwritten.
+    Results include per-point status and a durable partial summary. fail_fast stops after a
+    failed point; resume_from retries unfinished points after checking source and data hashes.
+    Cancellation terminates the current solver and preserves the checkpoint.
     """
-    return _sweep(Bridge(CONFIG),path,component,parameter,values,variable,frequency_hz,timeout)
+    return await run_async(lambda control: _sweep(Bridge(CONFIG),path,component,parameter,values,
+        variable,frequency_hz,timeout,fail_fast=fail_fast,resume_from=resume_from,control=control), context=ctx)
 
 
 @mcp.tool(annotations=READ)
-def compare_results(dataset_paths: DatasetPaths, variable: str, frequency_hz: Frequency,
+async def compare_results(dataset_paths: DatasetPaths, variable: str, frequency_hz: Frequency,
                     impedance: Impedance = 50) -> dict[str, Any]:
     """Compare a complex voltage at one actual frequency across 1..20 datasets (no interpolation).
 
     Includes magnitude and impedance-qualified dBm; AC samples are peak voltages, DC uses RMS.
     """
-    return _compare(Bridge(CONFIG),dataset_paths,variable,frequency_hz,impedance)
+    return await asyncio.to_thread(lambda: _compare(Bridge(CONFIG),dataset_paths,variable,frequency_hz,impedance))
 
+
+register_runtime_tools(mcp, CONFIG)
 
 def main():
     mcp.run(transport="stdio")

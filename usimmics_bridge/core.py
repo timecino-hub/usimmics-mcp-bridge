@@ -311,7 +311,7 @@ class Bridge:
         for root in self.roots:
             if root.is_dir():
                 for p in root.rglob("*.sch"):
-                    if p.resolve().is_relative_to(root) and ".usimmics-runs" not in p.parts:
+                    if p.resolve().is_relative_to(root) and not {".usimmics-runs", ".usimmics-sweeps", ".usimmics-previews"}.intersection(p.parts):
                         files.add(str(p.resolve()))
         return {"project_roots": [str(p) for p in self.roots], "schematics": sorted(files)}
 
@@ -402,20 +402,14 @@ class Bridge:
                     hb_frequency_keys_synchronized=bool(frequencies), gui_reload_required=True)
 
     def _execute_solver(self, netpath: Path, dataset: Path, log: Path, timeout: int):
-        """Execution hook kept separate from result validation and provenance."""
-        try:
-            proc = subprocess.run([str(self.simulator), str(netpath), str(dataset)], cwd=netpath.parent,
-                                  capture_output=True, timeout=timeout,
-                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        except subprocess.TimeoutExpired as exc:
-            log.write_bytes((exc.stdout or b'') + (exc.stderr or b'') + b'\nTIMEOUT\n')
-            raise
-        output = proc.stdout + proc.stderr
-        log.write_bytes(output)
-        return SolverOutcome(proc.returncode, output.decode('utf-8', errors='replace')[-2000:])
+        """Run without blocking MCP, retaining logs and terminating cancelled processes."""
+        from .execution import run_process
+        return run_process([str(self.simulator), str(netpath), str(dataset)],
+                           netpath.parent, log, timeout)
 
     def run_schematic(self, path: str, timeout: int = 60) -> dict:
         from . import __version__
+        from .execution import ExecutionCancelled, ExecutionTimeout, current_control
         from .provenance import SCHEMA_VERSION, dataset_sidecar, simulator_metadata, write_manifest
 
         p = self._path(path, ".sch")
@@ -450,6 +444,7 @@ class Bridge:
                 'validation': None, 'error': None}
         write_manifest(manifest, info)
         write_manifest(sidecar, info)
+        current_control().progress(message="Preparing simulation", manifest_path=str(manifest), log_path=str(log))
 
         def finish(status, *, error=None, exit_code=None, result=None):
             info.update(status=status, completed_at=datetime.now(timezone.utc).isoformat(),
@@ -470,7 +465,11 @@ class Bridge:
             # max_points bounds response size only: the reader validates every
             # value, including invalid samples later in an otherwise valid file.
             _, result = self._read_results_data(str(dataset), max_points=1, require_hb=True)
-        except subprocess.TimeoutExpired as exc:
+            current_control().check()
+        except ExecutionCancelled as exc:
+            finish('cancelled', error={'code': 'cancelled', 'message': str(exc)})
+            raise
+        except (subprocess.TimeoutExpired, ExecutionTimeout) as exc:
             finish('timed_out', error={'code': 'timeout', 'message': str(exc)})
             raise BridgeError(f"Simulation timed out; log: {log}") from exc
         except OSError as exc:
