@@ -10,7 +10,7 @@ Let an AI assistant build, simulate and inspect **uSimmics 5.9** circuits for yo
 
 [中文说明](docs/README.zh-CN.md) · [Tools and examples](docs/tools.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-![Preview of the bundled BAT54 mixer: the schematic above, its harmonic-balance spectrum below with labelled mixing products](docs/images/mixer-preview.png)
+![Preview of the bundled BAT54 mixer: the schematic above, its harmonic-balance spectrum below with labelled mixing products](docs/images/mixer-preview-v2.png)
 
 ## What you can ask for
 
