@@ -6,7 +6,7 @@
 
 [English](../README.md) · [工具说明（英文）](tools.md) · [参与贡献（英文）](../CONTRIBUTING.md)
 
-![自带 BAT54 混频器示例的预览：上方是电路图，下方是标注了混频分量的谐波平衡频谱](images/mixer-preview.png)
+![自带 BAT54 混频器示例的预览：上方是电路图，下方是标注了混频分量的谐波平衡频谱](images/mixer-preview-v2.png)
 
 ## 可以这样用
 
