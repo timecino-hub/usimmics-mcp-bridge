@@ -1,13 +1,13 @@
 """Disk workspace and preview operations; no GUI state or UI automation."""
-import json
 import os
 from pathlib import Path
 import re
 import tempfile
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from .core import Bridge, BridgeError, _parse, _compile, _sha
-from .locking import locked_write
+from .locking import file_lock, locked_write
 
 
 class Workbench(Bridge):
@@ -149,55 +149,86 @@ class Workbench(Bridge):
 
     @locked_write
     def publish_results(self, path, dataset_path, expected_sha256):
+        from .provenance import (SCHEMA_VERSION, dataset_sidecar, inspect_provenance,
+                                 manifest_bytes, provenance_summary)
+
         p = self._path(path, '.sch')
-        if _sha(p.read_bytes()) != expected_sha256:
+        source = p.read_bytes()
+        if _sha(source) != expected_sha256:
             raise BridgeError('Schematic changed; cannot publish stale results')
         dataset = self._path(dataset_path, '.dat')
-        manifest = self._path(str(dataset.parent/'manifest.json'), '.json')
-        info = json.loads(manifest.read_text(encoding='utf-8'))
-        if (info.get('source_sha256') != expected_sha256 or
-                Path(info.get('source','')).resolve() != p or
-                info.get('dataset_sha256') != _sha(dataset.read_bytes())):
-            raise BridgeError('Dataset provenance does not match this schematic')
-        self.read_results(str(dataset), 1)
-        text = p.read_text(encoding='utf-8-sig')
+        # Validate and publish exactly the same bytes; do not reopen the input
+        # after hashing/validation and accidentally publish a later file edit.
+        data, parsed = self._read_results_data(str(dataset), 1, require_hb=True)
+        provenance = inspect_provenance(self, dataset, parsed['dataset_sha256'],
+                                        source_path=p, source_sha256=expected_sha256)
+        if not provenance['verified']:
+            raise BridgeError('Dataset provenance does not match this schematic: ' + provenance['reason'])
+        text = source.decode('utf-8-sig')
         if not re.search(r'^DataSet=\*\.dat$', text, re.M):
             raise BridgeError('Publishing currently requires DataSet=*.dat')
         dest = self.target(str(p.with_suffix('.dat')), '.dat')
-        old_hash = _sha(dest.read_bytes()) if dest.is_file() else None
-        if _sha(p.read_bytes()) != expected_sha256:
-            raise BridgeError('Schematic changed during publication')
-        result = self.atomic_write(dest, dataset.read_bytes(), old_hash)
-        return {**result, 'source_sha256': expected_sha256, 'gui_reload_required': True}
+        sidecar = self.target(str(dataset_sidecar(dest)), '.json')
+        info = {**provenance['manifest'], 'schema_version': SCHEMA_VERSION, 'kind': 'published',
+                'dataset': str(dest), 'dataset_sha256': parsed['dataset_sha256'],
+                'source': str(p), 'source_sha256': expected_sha256,
+                'validation': parsed['validation'],
+                'published_at': datetime.now(timezone.utc).isoformat(),
+                'published_from': str(dataset), 'origin_manifest': provenance['manifest_path']}
+        # A pair of files cannot be replaced atomically. Persist an explicit
+        # pending state first; interruption can then never leave a new dataset
+        # looking verified by an older sidecar. Readers give it precedence over
+        # any legacy manifest.json in the same directory.
+        with file_lock(dest):
+            old_hash = _sha(dest.read_bytes()) if dest.is_file() else None
+            old_manifest_hash = _sha(sidecar.read_bytes()) if sidecar.is_file() else None
+            if _sha(p.read_bytes()) != expected_sha256:
+                raise BridgeError('Schematic changed during publication')
+            pending = {**info, 'status': 'publishing'}
+            pending_save = self.atomic_write(sidecar, manifest_bytes(pending), old_manifest_hash)
+            try:
+                result = self.atomic_write(dest, data, old_hash)
+                if _sha(p.read_bytes()) != expected_sha256:
+                    raise BridgeError('Schematic changed during publication')
+                self.atomic_write(sidecar, manifest_bytes({**info, 'status': 'success'}), pending_save['sha256'])
+            except (OSError, BridgeError) as exc:
+                raise BridgeError('Publication did not finish; dataset remains unverified: ' + str(exc)) from exc
+        return {**result, 'dataset_sha256': parsed['dataset_sha256'],
+                'dataset_manifest': str(sidecar), 'source_sha256': expected_sha256,
+                'provenance': provenance_summary(inspect_provenance(self, dest, parsed['dataset_sha256'],
+                                                                   source_path=p, source_sha256=expected_sha256)),
+                'gui_reload_required': True}
 
     def preview_schematic(self, path, dataset_path=None):
         from .preview import render
+        from .provenance import inspect_provenance, provenance_summary
         p = self._path(path, '.sch')
         source = self.read_schematic(str(p))
         check = self.check_text(source['content'])
         result = None
         freshness = 'no_dataset'
+        provenance = None
         if dataset_path:
             datafile = self._path(dataset_path, '.dat')
             result = self.read_results(str(datafile), 10000)
             if result['truncated']:
                 raise BridgeError('Dataset too large for preview (10000 points per variable)')
-            freshness = 'unverified'
-            manifest = datafile.parent/'manifest.json'
-            if manifest.is_file():
-                manifest = self._path(str(manifest), '.json')
-                info = json.loads(manifest.read_text(encoding='utf-8'))
-                freshness = 'matches_source' if (info.get('source_sha256') == source['sha256'] and
-                    info.get('dataset_sha256') == _sha(datafile.read_bytes())) else 'stale_or_modified'
+            provenance = inspect_provenance(self, datafile, result['dataset_sha256'],
+                                            source_path=p, source_sha256=source['sha256'])
+            freshness = provenance['state']
             if freshness != 'matches_source':
-                check['warnings'].append('Dataset freshness: '+freshness)
+                check['warnings'].append('Dataset freshness: ' + freshness + ': ' + provenance['reason'])
         folder = self.target(str(p.parent/'.usimmics-previews'))
         folder.mkdir(exist_ok=True)
         output = folder/(p.stem+'-'+uuid4().hex[:10]+'.png')
         notes = {'unverified': 'dataset provenance is not recorded; it may not belong to this schematic',
-                 'stale_or_modified': 'dataset does not match the saved schematic; rerun before trusting it'}
+                 'stale_or_modified': 'dataset does not match the saved schematic; rerun before trusting it',
+                 'invalid_provenance': 'dataset provenance is invalid; do not trust this result',
+                 'incomplete': 'dataset production or publication was interrupted; do not trust this result',
+                 'failed': 'dataset comes from an unsuccessful run; do not trust this result'}
         rendered = render(source['content'], output, p.name, result, notes.get(freshness))
         return {'path': str(p), 'source_sha256': source['sha256'], 'image_path': str(output),
                 'renderer': 'bridge schematic renderer, not a native GUI screenshot',
                 'state': 'saved_on_disk', 'dataset_freshness': freshness,
+                'provenance': provenance_summary(provenance) if provenance else None,
                 **rendered, 'warnings': check['warnings']+rendered['warnings']}
