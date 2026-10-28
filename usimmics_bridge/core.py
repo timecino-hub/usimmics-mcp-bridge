@@ -17,23 +17,14 @@ import tempfile
 from datetime import datetime, timezone
 from uuid import uuid4
 from .locking import locked_write
+from .component_specs import COMPONENT_SPECS, SUPPORTED, NAMES
+from .schemas import BridgeConfig, normalize_edits
 
 
 class BridgeError(ValueError):
     """A request cannot be performed within the supported interface."""
 
 
-SUPPORTED = {"R", "C", "L", "Vac", "Vdc", "Diode", "Filter", "GND", ".HB"}
-NAMES = {
-    "R": ["resistance", "temperature", "tc1", "tc2", "nominal_temperature", "symbol"],
-    "C": ["capacitance"], "L": ["inductance"],
-    "Vac": ["amplitude", "frequency", "phase", "delay", "symbol"],
-    "Vdc": ["voltage", "symbol", "package"],
-    "Diode": ["saturation_current", "emission_coefficient", "junction_capacitance"],
-    "Filter": ["frequency", "order", "class", "type", "reference_impedance", "bandwidth"],
-    ".HB": ["harmonics", "noise", "noise_frequency", "noise_sweep", "noise_start",
-            "noise_stop", "noise_points", "relative_tolerance", "absolute_tolerance", "iterations"],
-}
 PROP = re.compile(r'"([^"\r\n]*)"([01])')
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -136,15 +127,16 @@ def _parse(text: str):
         props = list(PROP.finditer(tail))
         if PROP.sub("", tail).strip():
             raise BridgeError(f"Unsupported property encoding for {name}")
-        expected={'R':6,'Vac':5,'Vdc':3,'Diode':32,'Filter':6,'.HB':10,'GND':0}
-        if kind in expected and len(props)!=expected[kind]:
-            raise BridgeError(f'Wrong property count for {kind}: expected {expected[kind]}')
+        spec = COMPONENT_SPECS.get(kind)
+        if spec is not None:
+            try:
+                spec.validate_properties(kind, [m[1] for m in props])
+            except ValueError as exc:
+                raise BridgeError(str(exc)) from exc
         if any('\\' in m[1] or any(ord(ch)<32 for ch in m[1]) for m in props):
             raise BridgeError('Unsupported property escape/control character')
         if orientation not in (0,1,2,3):
             raise BridgeError('Unsupported component orientation')
-        if kind=='.HB' and not re.fullmatch(r'\d+@;(?:\d+@[^@;]+;)*',props[0][1]):
-            raise BridgeError('Malformed HB harmonic frequency keys')
         components.append(dict(type=kind, name=name, active=active, x=x, y=y,
                                orientation=orientation, properties=[m[1] for m in props],
                                line=line_no, prefix=" ".join(fields[:8]),
@@ -196,12 +188,7 @@ def _compile(text: str) -> str:
             continue
         if kind == "GND":
             ground.add((x, y)); points.add((x, y)); continue
-        offsets = [(0, -30), (0, 30)] if kind in ("Vac", "Vdc") else [(-30, 0), (30, 0)]
-        result = []
-        for dx, dy in offsets:
-            for _ in range(rot):
-                dx, dy = dy, -dx
-            result.append((x + dx, y + dy))
+        result = COMPONENT_SPECS[kind].pins(x, y, rot)
         pins[name] = result
         points.update(result)
     parent = {p: p for p in points}
@@ -267,9 +254,9 @@ class Bridge:
     def __init__(self, config_path: Path):
         self.config_path = Path(config_path).resolve()
         try:
-            config = json.loads(self.config_path.read_text(encoding="utf-8-sig"))
-            self.installation = Path(config["installation_root"]).expanduser().resolve()
-            self.roots = [Path(p).expanduser().resolve() for p in config["project_roots"]]
+            config = BridgeConfig.model_validate(json.loads(self.config_path.read_text(encoding="utf-8-sig")))
+            self.installation = Path(config.installation_root).resolve()
+            self.roots = [Path(p).resolve() for p in config.project_roots]
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise BridgeError(f"Invalid bridge configuration: {exc}") from exc
         if not self.roots:
@@ -304,6 +291,7 @@ class Bridge:
                 p = subprocess.run([str(self.simulator), "--version"], capture_output=True,
                                    timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 status["simulator_banner"] = (p.stdout + p.stderr).decode("utf-8", errors="replace").strip()
+                status["simulator_returncode"] = p.returncode
             except (OSError, subprocess.TimeoutExpired) as exc:
                 status["simulator_error"] = str(exc)
         return status
@@ -336,8 +324,10 @@ class Bridge:
         original = p.read_bytes()
         if _sha(original) != expected_sha256:
             raise BridgeError("Schematic changed since inspection; inspect again")
-        if not isinstance(edits, list) or not edits:
-            raise BridgeError("edits must be a nonempty list")
+        try:
+            edits = normalize_edits(edits)
+        except ValueError as exc:
+            raise BridgeError(f'Invalid parameter edits: {exc}') from exc
         lines, components, _ = _parse(original.decode("utf-8-sig"))
         by_name = {c["name"]: c for c in components if c["type"] != "GND"}
         original_source_freqs={c['name']:c['properties'][1] for c in components if c['type']=='Vac' and c['active']}
